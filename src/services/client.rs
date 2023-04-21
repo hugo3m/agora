@@ -1,6 +1,9 @@
+use std::net::TcpStream;
+
 use tokio::io::AsyncWriteExt;
 
 use tokio::io::AsyncReadExt;
+use tokio::net::tcp::WriteHalf;
 
 async fn read_stdin() -> std::io::Result<String> {
     let mut input: String = String::new();
@@ -28,20 +31,21 @@ async fn socket_input(mut socket: tokio::net::TcpStream) -> std::io::Result<()> 
     }
 }
 
-async fn user_input(mut socket: tokio::net::TcpStream) -> std::io::Result<()> {
+async fn user_input(mut socket_input: tokio::net::tcp::OwnedWriteHalf) -> std::io::Result<()> {
     loop {
         let input = read_stdin().await?;
         let size_in_byte: [u8; 8] = input.len().to_ne_bytes();
-        socket.write_all(&size_in_byte).await?;
-        socket.write_all(input.as_bytes()).await?;
+        socket_input.write_all(&size_in_byte).await?;
+        socket_input.write_all(input.as_bytes()).await?;
     }
 }
 
 pub async fn start() -> Result<(), Box<dyn std::error::Error>> {
     let socket = tokio::net::TcpStream::connect("127.0.0.1:8080").await?;
     println!("TCP Stream connected");
-    let task_user_input = tokio::task::spawn(user_input(socket));
-    let task_socket_input = tokio::task::spawn(socket_input(socket));
+    let (output, input) = socket.into_split();
+    let task_user_input = tokio::task::spawn(user_input(input));
+    // let task_socket_input = tokio::task::spawn(socket_input(socket));
     let _result = task_user_input.await?;
     Ok(())
 }
