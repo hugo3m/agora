@@ -9,7 +9,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if &args[1][..] == "client" {
-        services::client::start().await?;
+        services::user::start().await?;
     }
 
     if &args[1][..] == "server" {
