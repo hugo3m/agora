@@ -2,7 +2,7 @@ mod client;
 
 use std::io::Error;
 
-/// ### Start the server  
+/// ### Start the server
 pub async fn start() -> Result<(), Error> {
     // Retrieve addresse
     let addr = "127.0.0.1:8080".to_string();
