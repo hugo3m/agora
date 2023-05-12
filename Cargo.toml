@@ -1,5 +1,5 @@
 [package]
-name = "rust"
+name = "agora"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
+futures = { version = "0.3.28" }

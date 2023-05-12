@@ -46,12 +46,11 @@ async fn read_socket_output(
         // Read nessage
         socket_output.read_exact(&mut input_in_bytes).await?;
         // Write the input into socket inputs
-        write_socket_input(
+        let _task = tokio::task::spawn(write_socket_input(
             Arc::clone(&arcmutex_socket_inputs),
             input_in_bytes.to_vec(),
             id,
-        )
-        .await?;
+        ));
     }
 }
 /// Write input into all the socket input
