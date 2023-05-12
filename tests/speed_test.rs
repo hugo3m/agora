@@ -8,11 +8,13 @@ const ITERATION: u64 = 976563;
 const START: &str = "/start";
 const STOP: &str = "/stop";
 const DOWNLOADS: u64 = 2;
+const UPLOADS: u64 = 8;
 
 #[tokio::test]
-async fn speedtest() {
-    let mut tasks: Vec<tokio::task::JoinHandle<Result<std::time::Duration, std::io::Error>>> =
-        Vec::new();
+async fn download_speedtest() {
+    let mut tasks: Vec<
+        tokio::task::JoinHandle<Result<(std::time::Duration, u64), std::io::Error>>,
+    > = Vec::new();
     // Connect on upload user
     let Ok((_, input_upload)) = agora::services::user::connect().await else {panic!()};
     for _ in 0..DOWNLOADS {
@@ -29,16 +31,69 @@ async fn speedtest() {
     let upload_time = result_upload.unwrap().unwrap();
     // Calculate upload speed
     let upload_speed: f64 = ((SIZE as u64 * ITERATION) / upload_time.as_secs()) as f64;
-    println!("Upload speed is {} MB/s", upload_speed / 1000000f64);
+    println!(
+        "Uploaded {} bytes, Upload speed is {} MB/s",
+        ITERATION * SIZE as u64,
+        upload_speed / 1000000f64
+    );
     // Retrieve download times
-    let download_times: Vec<std::time::Duration> = results_download
+    let results: Vec<(std::time::Duration, u64)> = results_download
         .into_iter()
         .map(|result_download| result_download.unwrap().unwrap())
         .collect();
-    for download_time in &download_times {
-        let download_speed: f64 = ((SIZE as u64 * ITERATION) / download_time.as_secs()) as f64;
-        println!("Download speed is {} MB/s", download_speed / 1000000f64);
+    let mut sum_time: f64 = 0f64;
+    let mut sum_quantity: u64 = 0;
+    // Iterate over each result
+    for result in &results {
+        let download_time = result.0;
+        let quantity = result.1;
+        let download_speed: f64 = (quantity / download_time.as_secs()) as f64;
+        sum_time += download_speed;
+        sum_quantity += quantity;
+        println!(
+            "Downdload {} bytes, speed is {} MB/s",
+            quantity,
+            download_speed / 1000000f64
+        );
     }
+    println!(
+        "Download quantity mean: {} bytes | Speed mean: {} MB/s",
+        sum_quantity / results.len() as u64,
+        sum_time / (1000000f64 * results.len() as f64)
+    )
+}
+
+#[tokio::test]
+async fn upload_speedtest() {
+    let mut tasks: Vec<tokio::task::JoinHandle<Result<std::time::Duration, std::io::Error>>> =
+        Vec::new();
+    for _ in 0..UPLOADS {
+        // Connect on download user
+        let Ok((_, input_upload)) = agora::services::user::connect().await else {panic!()};
+        tasks.push(tokio::spawn(upload(input_upload)));
+    }
+    // Wait for upload to finish
+    let results_upload = futures::future::join_all(tasks).await;
+    // Retrieve download times
+    let results: Vec<std::time::Duration> = results_upload
+        .into_iter()
+        .map(|result_upload| result_upload.unwrap().unwrap())
+        .collect();
+    let mut sum_time: f64 = 0f64;
+    for result in &results {
+        let download_time = result;
+        let download_speed: f64 = (ITERATION * SIZE as u64 / download_time.as_secs()) as f64;
+        sum_time += download_speed;
+        println!(
+            "Downdload {} bytes, speed is {} MB/s",
+            ITERATION * SIZE as u64,
+            download_speed / 1000000f64
+        );
+    }
+    println!(
+        "Speed mean: {} MB/s",
+        sum_time / (1000000f64 * results.len() as f64)
+    )
 }
 
 /// Upload as many bytes as SIZE * ITERATION
@@ -71,49 +126,48 @@ async fn upload(mut input: OwnedWriteHalf) -> tokio::io::Result<std::time::Durat
 ///
 /// ## Arguments
 /// * output : Output to read from the socket
-async fn download(mut output: OwnedReadHalf) -> tokio::io::Result<std::time::Duration> {
-    // Init size to read in bytes
-    let mut size_in_bytes: [u8; 8] = [0u8; 8];
-    // Read the size of the message
-    output.read_exact(&mut size_in_bytes).await?;
-    // Convert size to usize
-    let size: usize = usize::from_ne_bytes(size_in_bytes);
-    // Init data in bytes
-    let mut output_in_bytes = vec![0u8; size];
-    // Read the output in bytes
-    output.read_exact(&mut output_in_bytes).await?;
-    // If START command
-    if String::from(std::str::from_utf8(&output_in_bytes).unwrap()) == String::from(START) {
-        // Start timer
-        let begin = std::time::Instant::now();
-        // Run
-        let mut run = true;
-        // While run
-        while run {
-            // Init size to read in bytes
-            let mut size_in_bytes: [u8; 8] = [0u8; 8];
-            // Read the size of the message
-            output.read_exact(&mut size_in_bytes).await?;
-            // Convert size to usize
-            let size: usize = usize::from_ne_bytes(size_in_bytes);
-            // Init data in bytes
-            let mut output_in_bytes = vec![0u8; size];
-            // Read the output in bytes
-            output.read_exact(&mut output_in_bytes).await?;
-            // If stop command
-            if size == STOP.len()
-                && String::from(std::str::from_utf8(&output_in_bytes).unwrap())
-                    == String::from(STOP)
-            {
-                // Stop running
-                run = false
-            }
+async fn download(mut output: OwnedReadHalf) -> tokio::io::Result<(std::time::Duration, u64)> {
+    // Run
+    let mut run = true;
+    // Start timer
+    let mut begin: Option<std::time::Instant> = None;
+    // Init byte counter
+    let mut counter: u64 = 0u64;
+    // While run
+    while run {
+        // Init size to read in bytes
+        let mut size_in_bytes: [u8; 8] = [0u8; 8];
+        // Read the size of the message
+        output.read_exact(&mut size_in_bytes).await?;
+        // Convert size to usize
+        let size: usize = usize::from_ne_bytes(size_in_bytes);
+        // Init data in bytes
+        let mut output_in_bytes = vec![0u8; size];
+        // Read the output in bytes
+        output.read_exact(&mut output_in_bytes).await?;
+        // If start command
+        if size == START.len()
+            && String::from(std::str::from_utf8(&output_in_bytes).unwrap()) == String::from(START)
+        {
+            begin = Some(std::time::Instant::now());
         }
-        // Retrieve timer elapsed time
-        let elapsed_time = begin.elapsed();
-        // Return time
-        Ok(elapsed_time)
+        // If stop command
+        else if size == STOP.len()
+            && String::from(std::str::from_utf8(&output_in_bytes).unwrap()) == String::from(STOP)
+        {
+            // Stop running
+            run = false
+        } else {
+            counter += size as u64
+        }
+    }
+    // Retrieve timer elapsed time
+    if let Some(start_time) = begin {
+        return Ok((start_time.elapsed(), counter));
     } else {
-        panic!()
+        return Err(tokio::io::Error::new(
+            tokio::io::ErrorKind::Other,
+            "Timer not started",
+        ));
     }
 }
