@@ -7,8 +7,8 @@ const SIZE: usize = 1024;
 const ITERATION: u64 = 976563;
 const START: &str = "/start";
 const STOP: &str = "/stop";
-const DOWNLOADS: u64 = 2;
-const UPLOADS: u64 = 8;
+const DOWNLOADS: u64 = 1;
+const UPLOADS: u64 = 20;
 
 #[tokio::test]
 async fn download_speedtest() {
